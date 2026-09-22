@@ -38,11 +38,10 @@ ago. `test_rows_frame_vs_calendar_range_frame` demonstrates this and the RANGE a
 ## 4. Forward-fill with `last(..., ignorenulls=True)`
 
 ```python
-history = Window.partitionBy("site_id").orderBy("reading_hour") \
-                .rowsBetween(Window.unboundedPreceding, Window.currentRow)
-kwh_filled = F.coalesce(F.col("kwh_consumed"),
-                        F.last("kwh_consumed", ignorenulls=True).over(history),
-                        F.lit(0.0))
+history = (
+    Window.partitionBy("site_id").orderBy("reading_hour").rowsBetween(Window.unboundedPreceding, Window.currentRow)
+)
+kwh_filled = F.coalesce(F.col("kwh_consumed"), F.last("kwh_consumed", ignorenulls=True).over(history), F.lit(0.0))
 ```
 
 Input `1.0, 2.5, NULL, 4.0` → `1.0, 2.5, 2.5, 4.0` with `is_imputed = true` on the third row.
@@ -101,9 +100,11 @@ LAST_VALUE(site_id) OVER (PARTITION BY month_start, region ORDER BY kwh_total DE
 ## 9. Running totals — `ROWS UNBOUNDED PRECEDING`
 
 ```python
-month_to_date = Window.partitionBy("site_id", F.date_trunc("month", "reading_date")) \
-                      .orderBy("reading_date") \
-                      .rowsBetween(Window.unboundedPreceding, Window.currentRow)
+month_to_date = (
+    Window.partitionBy("site_id", F.date_trunc("month", "reading_date"))
+    .orderBy("reading_date")
+    .rowsBetween(Window.unboundedPreceding, Window.currentRow)
+)
 F.sum("kwh_total").over(month_to_date)
 ```
 
@@ -112,12 +113,12 @@ The partition on the truncated month makes the total restart every month.
 ## 10. Moving averages — ROWS vs RANGE frames
 
 ```python
-series      = Window.partitionBy("site_id").orderBy("reading_date")
-day_num     = F.datediff("reading_date", F.lit("1970-01-01"))
+series = Window.partitionBy("site_id").orderBy("reading_date")
+day_num = F.datediff("reading_date", F.lit("1970-01-01"))
 calendar_30 = Window.partitionBy("site_id").orderBy(day_num).rangeBetween(-29, 0)
 
-F.avg("kwh_total").over(series.rowsBetween(-6, 0))   # last 7 *rows*
-F.avg("kwh_total").over(calendar_30)                 # last 30 *days*, by value of day_num
+F.avg("kwh_total").over(series.rowsBetween(-6, 0))  # last 7 *rows*
+F.avg("kwh_total").over(calendar_30)  # last 30 *days*, by value of day_num
 ```
 
 With daily totals on Jan 1–3 and Feb 9: the ROWS average on Feb 9 is `(10+20+30+100)/4 = 40`; the
@@ -129,7 +130,7 @@ RANGE average is `100` because nothing else falls within the previous 29 days.
 row being scored, so a spike cannot inflate its own baseline.
 
 ```python
-z = (kwh - avg(kwh).over(trailing)) / stddev_samp(kwh).over(trailing)   # flag |z| > 3
+z = (kwh - avg(kwh).over(trailing)) / stddev_samp(kwh).over(trailing)  # flag |z| > 3
 ```
 
 ## 12. Gaps and islands

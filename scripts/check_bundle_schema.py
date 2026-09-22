@@ -77,10 +77,15 @@ def leaf_errors(err: jsonschema.ValidationError) -> list[jsonschema.ValidationEr
     if not err.context:
         return [err]
     leaves = [leaf for child in err.context for leaf in leaf_errors(child)]
-    # Keep every error that points *inside* this node; if none does, all branches failed on
-    # the value itself (e.g. a string where an int is expected), so the summary line is enough.
+    # Prefer errors that point *inside* this node (a typo in a nested key), then errors from the
+    # object branch itself (missing required key, unknown key); the interpolation branch only ever
+    # says "not a string" / "does not match pattern", which is noise. If everything failed on the
+    # value itself (e.g. a string where an int is expected), the summary line is enough.
     deeper = [leaf for leaf in leaves if len(leaf.absolute_path) > len(err.absolute_path)]
-    return deeper or [err]
+    if deeper:
+        return deeper
+    informative = [leaf for leaf in leaves if leaf.validator not in {"type", "pattern"}]
+    return informative or [err]
 
 
 def report(config: dict[str, Any], schema: dict[str, Any]) -> list[str]:
