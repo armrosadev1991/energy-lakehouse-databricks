@@ -67,14 +67,38 @@ def cli_schema() -> dict[str, Any]:
     return portable_schema(json.loads(out.stdout))  # type: ignore[no-any-return]
 
 
+def leaf_errors(err: jsonschema.ValidationError) -> list[jsonschema.ValidationError]:
+    """Descend through ``oneOf`` contexts to the deepest errors.
+
+    Every object in the CLI schema is ``oneOf: [<object>, <"${...}" string>]``, so a typo deep
+    inside a job is reported by jsonschema as "resources is not valid under any of the given
+    schemas". The most deeply nested errors are the ones a human wants to read.
+    """
+    if not err.context:
+        return [err]
+    leaves = [leaf for child in err.context for leaf in leaf_errors(child)]
+    # Keep every error that points *inside* this node; if none does, all branches failed on
+    # the value itself (e.g. a string where an int is expected), so the summary line is enough.
+    deeper = [leaf for leaf in leaves if len(leaf.absolute_path) > len(err.absolute_path)]
+    return deeper or [err]
+
+
+def report(config: dict[str, Any], schema: dict[str, Any]) -> list[str]:
+    validator = jsonschema.validators.validator_for(schema)(schema)
+    seen: dict[tuple[str, str], None] = {}
+    for err in validator.iter_errors(config):
+        for leaf in leaf_errors(err):
+            path = "/".join(str(p) for p in leaf.absolute_path) or "<root>"
+            seen.setdefault((path, leaf.message[:200]), None)
+    return [f"{path}: {message}" for path, message in seen]
+
+
 def main() -> int:
     config = load_bundle_config()
-    schema = cli_schema()
-    validator = jsonschema.validators.validator_for(schema)(schema)
-    errors = sorted(validator.iter_errors(config), key=lambda e: list(e.path))
+    errors = report(config, cli_schema())
     if errors:
-        for err in errors:
-            print(f"✗ {'/'.join(str(p) for p in err.path) or '<root>'}: {err.message[:300]}")
+        for line in errors:
+            print(f"✗ {line}")
         return 1
     n_jobs = len(config.get("resources", {}).get("jobs", {}))
     print(f"✓ bundle config valid against CLI schema ({n_jobs} job(s), targets: {sorted(config['targets'])})")
