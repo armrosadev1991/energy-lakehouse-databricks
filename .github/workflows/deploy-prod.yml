@@ -1,0 +1,52 @@
+# Promote to production when a GitHub release is published (or on demand).
+# The `prod` GitHub Environment should carry a required-reviewers rule: that is the
+# manual approval gate between "tested in dev" and "running in prod".
+name: Deploy prod
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      run_pipeline:
+        description: Trigger a pipeline run after deploying
+        type: boolean
+        default: false
+
+concurrency: deploy-prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    # Skipped until the repository-level DATABRICKS_HOST variable exists (see README).
+    if: ${{ vars.DATABRICKS_HOST != '' }}
+    name: Deploy bundle to prod
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_BUNDLE_ENV: prod
+      BUNDLE_VAR_service_principal_id: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      BUNDLE_VAR_catalog: ${{ vars.DATABRICKS_CATALOG || 'main' }}
+      BUNDLE_VAR_notification_email: ${{ vars.NOTIFICATION_EMAIL || 'data-platform@example.com' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Validate
+        run: databricks bundle validate
+
+      - name: Deploy
+        run: databricks bundle deploy
+
+      - name: Run the medallion pipeline
+        if: ${{ github.event_name == 'release' || inputs.run_pipeline }}
+        run: databricks bundle run energy_medallion_pipeline

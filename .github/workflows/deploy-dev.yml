@@ -1,0 +1,45 @@
+# Deploy to the `dev` target on every push to main and run the pipeline end to end.
+# This is the integration environment: whatever lands on main is exercised on real
+# serverless compute before it can be promoted to prod.
+name: Deploy dev
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys of the same target at once (bundle deploy takes a lock anyway).
+concurrency: deploy-dev
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-and-run:
+    # Skipped until the repository-level DATABRICKS_HOST variable exists (see README).
+    if: ${{ vars.DATABRICKS_HOST != '' }}
+    name: Deploy bundle to dev and run the pipeline
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_BUNDLE_ENV: dev
+      BUNDLE_VAR_catalog: ${{ vars.DATABRICKS_CATALOG || 'main' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Validate
+        run: databricks bundle validate
+
+      - name: Deploy (builds the wheel via artifacts.build)
+        run: databricks bundle deploy
+
+      - name: Run the medallion pipeline
+        run: databricks bundle run energy_medallion_pipeline

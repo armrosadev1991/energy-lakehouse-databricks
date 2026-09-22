@@ -1,0 +1,27 @@
+# Databricks bundle state and build output
+.databricks/
+build/
+dist/
+*.egg-info/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local Spark / Delta scratch
+spark-warehouse/
+metastore_db/
+derby.log
+scratch/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

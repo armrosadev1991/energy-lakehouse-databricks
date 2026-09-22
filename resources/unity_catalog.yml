@@ -1,0 +1,20 @@
+# Unity Catalog objects owned by the bundle: the medallion schema and its landing volume.
+# In dev mode the schema name is prefixed (dev_<user>_energy) so every developer gets an
+# isolated copy; ${resources.schemas.energy.name} always resolves to the effective name.
+resources:
+  schemas:
+    energy:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}
+      comment: >-
+        Energy smart-meter lakehouse. Layers: bronze_* (raw, append-only),
+        silver_* (typed, de-duplicated, SCD2), gold_* (window-function analytics),
+        ops_* (data-quality results).
+
+  volumes:
+    landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.energy.name}
+      name: landing
+      volume_type: MANAGED
+      comment: Raw CSV landing area read by the bronze layer (one folder per feed).

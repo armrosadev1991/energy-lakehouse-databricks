@@ -1,0 +1,69 @@
+# Declarative Automation Bundle (formerly Databricks Asset Bundle) for the energy lakehouse.
+# Docs: https://docs.databricks.com/aws/en/dev-tools/bundles/
+#
+#   databricks bundle validate            # check config against the dev target
+#   databricks bundle deploy  -t dev      # build the wheel, deploy schema + volume + job
+#   databricks bundle run     -t dev energy_medallion_pipeline
+#   databricks bundle deploy  -t prod     # run from CI only (see .github/workflows)
+bundle:
+  name: energy_lakehouse
+  databricks_cli_version: ">= 0.250.0"
+
+include:
+  - resources/*.yml
+
+# The Python package under src/ is built into a wheel on every deploy and installed into
+# the job's serverless environment (resources/energy_medallion.job.yml -> environments).
+artifacts:
+  energy_lakehouse:
+    type: whl
+    build: uv build --wheel
+    path: .
+    # Patch the wheel version with a timestamp on every deploy: serverless environments cache
+    # installed packages by version, so an unchanged version could keep running old code.
+    dynamic_version: true
+
+variables:
+  catalog:
+    description: Unity Catalog catalog that holds the medallion schema
+    default: main
+  schema:
+    description: Schema (database) for bronze_*, silver_*, gold_* and ops_* tables
+    default: energy
+  notification_email:
+    description: Address notified when the pipeline job fails
+    default: data-platform@example.com
+  service_principal_id:
+    description: Application ID of the service principal that owns production resources
+    default: 00000000-0000-0000-0000-000000000000
+
+# Workspace selection: the CLI does not allow variables in `workspace.host`, so the host is
+# supplied at runtime instead of being hard-coded here — either through the DATABRICKS_HOST
+# environment variable (what the GitHub Actions workflows do, via OIDC) or a named profile
+# in ~/.databrickscfg (`databricks bundle deploy -t dev --profile my-dev-workspace`). To pin
+# a workspace per target, add `workspace: { host: https://<workspace-url> }` to the target.
+targets:
+  # Personal development copy: resources are prefixed with "[dev <user>]" (schemas with
+  # "dev_<user>_"), schedules are paused and the deploy lock is disabled.
+  dev:
+    mode: development
+    default: true
+
+  # Production: a single shared copy owned by a service principal, deployed only from CI.
+  prod:
+    mode: production
+    workspace:
+      # A single copy in the service principal's home folder (restricted, unlike /Shared),
+      # independent of whichever CI run performs the deploy.
+      root_path: /Workspace/Users/${var.service_principal_id}/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.service_principal_id}
+    permissions:
+      - level: CAN_MANAGE
+        service_principal_name: ${var.service_principal_id}
+      - level: CAN_VIEW
+        group_name: users
+    variables:
+      # The service principal comes from CI (BUNDLE_VAR_service_principal_id); see README.
+      catalog: main
+      schema: energy

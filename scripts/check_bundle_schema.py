@@ -1,0 +1,85 @@
+"""Validate every bundle YAML file against the JSON schema shipped with the Databricks CLI.
+
+This catches typos in resource keys without needing workspace credentials (full
+``databricks bundle validate`` also resolves ``${workspace.*}`` lookups, which does).
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import jsonschema
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def deep_merge(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    out = dict(a)
+    for k, v in b.items():
+        out[k] = deep_merge(out[k], v) if isinstance(out.get(k), dict) and isinstance(v, dict) else v
+    return out
+
+
+def load_bundle_config() -> dict[str, Any]:
+    merged: dict[str, Any] = yaml.safe_load((ROOT / "databricks.yml").read_text())
+    for pattern in merged.get("include", []):
+        for path in sorted(ROOT.glob(pattern)):
+            merged = deep_merge(merged, yaml.safe_load(path.read_text()) or {})
+    return merged
+
+
+def _python_regex(pattern: str) -> str:
+    """Translate the Go/ECMA unicode classes the CLI schema uses into ``re``-compatible ones."""
+    return (
+        pattern.replace(r"[\p{L}\p{N}]", r"[^\W_]")  # letters or digits
+        .replace(r"\p{L}", r"[^\W\d_]")  # letters
+        .replace(r"\p{N}", r"\d")  # digits
+    )
+
+
+def portable_schema(node: Any) -> Any:
+    r"""Rewrite the schema's ``${...}`` interpolation regexes so Python's ``re`` can compile them.
+
+    The CLI's JSON schema is written for Go's regexp (``\p{L}``); nothing else changes, so
+    ``oneOf`` branches, enums, key names and value types are all still checked exactly.
+    """
+    if isinstance(node, dict):
+        return {
+            k: (_python_regex(v) if k == "pattern" and isinstance(v, str) else portable_schema(v))
+            for k, v in node.items()
+        }
+    if isinstance(node, list):
+        return [portable_schema(v) for v in node]
+    return node
+
+
+def cli_schema() -> dict[str, Any]:
+    if shutil.which("databricks") is None:
+        msg = "databricks CLI not found on PATH"
+        raise RuntimeError(msg)
+    out = subprocess.run(["databricks", "bundle", "schema"], check=True, capture_output=True, text=True)
+    return portable_schema(json.loads(out.stdout))  # type: ignore[no-any-return]
+
+
+def main() -> int:
+    config = load_bundle_config()
+    schema = cli_schema()
+    validator = jsonschema.validators.validator_for(schema)(schema)
+    errors = sorted(validator.iter_errors(config), key=lambda e: list(e.path))
+    if errors:
+        for err in errors:
+            print(f"✗ {'/'.join(str(p) for p in err.path) or '<root>'}: {err.message[:300]}")
+        return 1
+    n_jobs = len(config.get("resources", {}).get("jobs", {}))
+    print(f"✓ bundle config valid against CLI schema ({n_jobs} job(s), targets: {sorted(config['targets'])})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

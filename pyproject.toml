@@ -1,0 +1,72 @@
+[project]
+name = "energy_lakehouse"
+version = "0.1.0"
+description = "Energy smart-meter lakehouse on Databricks: medallion architecture with PySpark window analytics"
+readme = "README.md"
+authors = [{ name = "armrosadev1991" }]
+requires-python = ">=3.12,<3.13"
+# Runtime dependencies are intentionally empty: pyspark / delta are provided by the
+# Databricks serverless environment (see resources/*.job.yml -> environments).
+dependencies = []
+
+[project.scripts]
+# Referenced by python_wheel_task.entry_point in resources/energy_medallion.job.yml
+main = "energy_lakehouse.cli:main"
+
+[dependency-groups]
+dev = [
+    # Local Spark, pinned to the Spark 4.0 line to mirror Databricks serverless environments.
+    "pyspark==4.0.4",
+    "delta-spark==4.0.1",
+    "pytest>=9.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.14",
+    "mypy>=1.17",
+    "pyyaml>=6.0",
+    "types-pyyaml",
+    "jsonschema>=4.23",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/energy_lakehouse"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "N", "W", "SIM", "RUF"]
+ignore = ["RUF012", "N812"]  # N812: `from pyspark.sql import functions as F` is the PySpark idiom
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["energy_lakehouse"]
+warn_unreachable = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["delta.*", "databricks.*", "jsonschema.*", "pyspark.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q --strict-markers"
+markers = [
+    "integration: end-to-end medallion run on local Spark (slower)",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["energy_lakehouse"]
+branch = true

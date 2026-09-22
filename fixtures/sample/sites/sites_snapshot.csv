@@ -1,0 +1,5 @@
+site_id,site_name,region,customer_segment,tariff_plan,contracted_kw,effective_from
+S001,Residential site 001,north,residential,flat,6.9,2024-01-02
+S001,Residential site 001,north,residential,time_of_use,6.9,2025-01-02
+S001,Residential site 001,north,residential,flat,6.9,2025-01-11
+S002,Commercial site 002,centre,commercial,time_of_use,41.4,2024-01-02

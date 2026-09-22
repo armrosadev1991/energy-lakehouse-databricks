@@ -1,0 +1,131 @@
+# The medallion pipeline as a single Lakeflow Job on serverless compute.
+#
+#   generate_sample_data -> bronze_ingest -> silver_transform -> gold_analytics -> data_quality
+#
+# Every task runs the same wheel entry point (`main`, see pyproject.toml [project.scripts])
+# with a different --stage, so the layers can also be re-run individually from the UI.
+resources:
+  jobs:
+    energy_medallion_pipeline:
+      name: energy_medallion_pipeline
+      description: Bronze -> silver -> gold medallion pipeline over synthetic smart-meter data.
+      tags:
+        project: energy_lakehouse
+        architecture: medallion
+
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+      queue:
+        enabled: true
+
+      # Daily; automatically paused when deployed with mode: development.
+      trigger:
+        periodic:
+          interval: 1
+          unit: DAYS
+
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+
+      # Job-level parameters: overridable per run, referenced by tasks as {{job.parameters.x}}.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${resources.schemas.energy.name}
+        - name: landing_path
+          default: /Volumes/${var.catalog}/${resources.schemas.energy.name}/${resources.volumes.landing.name}
+        - name: n_sites
+          default: "12"
+        - name: n_days
+          default: "60"
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "5"
+            dependencies:
+              - ../dist/*.whl
+
+      tasks:
+        - task_key: generate_sample_data
+          environment_key: default
+          python_wheel_task:
+            package_name: energy_lakehouse
+            entry_point: main
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--landing-path"
+              - "{{job.parameters.landing_path}}"
+              - "--stage"
+              - "generate"
+              - "--n-sites"
+              - "{{job.parameters.n_sites}}"
+              - "--n-days"
+              - "{{job.parameters.n_days}}"
+
+        - task_key: bronze_ingest
+          depends_on:
+            - task_key: generate_sample_data
+          environment_key: default
+          python_wheel_task:
+            package_name: energy_lakehouse
+            entry_point: main
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--landing-path"
+              - "{{job.parameters.landing_path}}"
+              - "--stage"
+              - "bronze"
+
+        - task_key: silver_transform
+          depends_on:
+            - task_key: bronze_ingest
+          environment_key: default
+          python_wheel_task:
+            package_name: energy_lakehouse
+            entry_point: main
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--stage"
+              - "silver"
+
+        - task_key: gold_analytics
+          depends_on:
+            - task_key: silver_transform
+          environment_key: default
+          python_wheel_task:
+            package_name: energy_lakehouse
+            entry_point: main
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--stage"
+              - "gold"
+
+        - task_key: data_quality
+          depends_on:
+            - task_key: gold_analytics
+          environment_key: default
+          python_wheel_task:
+            package_name: energy_lakehouse
+            entry_point: main
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--stage"
+              - "quality"
